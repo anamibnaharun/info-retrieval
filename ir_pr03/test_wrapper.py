@@ -11,6 +11,17 @@
 from document import Document
 from re import Pattern
 
+from my_module import (
+    remove_stop_words,
+    remove_stop_words_by_frequency,
+    load_collection_from_url,
+    linear_boolean_search as _linear_boolean_search,
+    stem_term as _stem_term,
+    vector_space_search as _vector_space_search,
+    precision_recall as _precision_recall,
+    update_document_stems,
+)
+
 
 def remove_stopwords_by_list(doc: Document, stopwords: set[str]):
     """
@@ -27,9 +38,8 @@ def remove_stopwords_by_list(doc: Document, stopwords: set[str]):
         stopwords: The stop words to remove
     """
 
-    # The following code is an example. You may replace it how you see fit:
-    from my_module import remove_stop_words
     doc._filtered_terms = remove_stop_words(doc.terms, stopwords)
+    update_document_stems(doc)
 
 
 def remove_stopwords_by_frequency(doc, collection: list[Document], common_frequency: float, rare_frequency: float):
@@ -53,8 +63,10 @@ def remove_stopwords_by_frequency(doc, collection: list[Document], common_freque
     # from my_module import remove_stopwords
     # remove_stopwords_by_frequency(doc, collection, common_frequency, rare_frequency)
 
-    from my_module import remove_stop_words_by_frequency
-    doc._filtered_terms = remove_stop_words_by_frequency(doc.terms, collection, low_freq=rare_frequency, high_freq=common_frequency)
+    doc._filtered_terms = remove_stop_words_by_frequency(
+        doc.terms, collection, low_freq=rare_frequency, high_freq=common_frequency
+    )
+    update_document_stems(doc)
 
 
 def load_documents_from_url(url: str, author: str, origin: str, start_line: int, end_line: int,
@@ -82,11 +94,15 @@ def load_documents_from_url(url: str, author: str, origin: str, start_line: int,
     """
 
     # The following code is an example. You may replace it how you see fit:
-    from my_module import load_collection_from_url
     return load_collection_from_url(url, search_pattern, start_line, end_line, author, origin)
 
 
-def linear_boolean_search(term, collection, stopword_filtered=False):
+def stem_term(term: str) -> str:
+    """Expose Porter stemming via the wrapper."""
+    return _stem_term(term)
+
+
+def linear_boolean_search(term, collection, stopword_filtered=False, stemmed=False):
     """
     Search a given collection of documents for all documents that contain a given term, using a simple Boolean model.
 
@@ -101,5 +117,14 @@ def linear_boolean_search(term, collection, stopword_filtered=False):
     """
 
     # The following code is an example. You may replace it how you see fit:
-    from my_module import linear_boolean_search
-    return linear_boolean_search(term, collection, stopword_filtered)
+    return _linear_boolean_search(term, collection, stopword_filtered, stemmed)
+
+
+def vector_space_search(query, collection, stopword_filtered=False, stemmed=False):
+    """Expose vector space search through the wrapper."""
+    return _vector_space_search(query, collection, stopword_filtered, stemmed)
+
+
+def precision_recall(retrieved: set[int], relevant: set[int]):
+    """Expose precision and recall computation."""
+    return _precision_recall(retrieved, relevant)

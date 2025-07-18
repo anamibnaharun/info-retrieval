@@ -9,6 +9,53 @@ from typing import List
 from document import Document
 
 
+# --- Helper code for Porter stemming ---
+VOWELS = "aeiou"
+
+
+def _is_consonant(word: str, i: int) -> bool:
+    if i < 0:
+        i += len(word)
+    ch = word[i]
+    if ch in VOWELS:
+        return False
+    if ch == "y":
+        return False if i == 0 else not _is_consonant(word, i - 1)
+    return True
+
+
+def _measure(word: str) -> int:
+    """Return the measure (m) of a word as defined in the Porter algorithm."""
+    m = 0
+    i = 0
+    length = len(word)
+    while i < length:
+        while i < length and _is_consonant(word, i):
+            i += 1
+        if i >= length:
+            break
+        while i < length and not _is_consonant(word, i):
+            i += 1
+        m += 1
+    return m
+
+
+def _contains_vowel(word: str) -> bool:
+    return any(not _is_consonant(word, i) for i in range(len(word)))
+
+
+def _doublec(word: str) -> bool:
+    return len(word) >= 2 and word[-1] == word[-2] and _is_consonant(word, len(word) - 1)
+
+
+def _cvc(word: str) -> bool:
+    if len(word) < 3:
+        return False
+    if not (_is_consonant(word, -1) and not _is_consonant(word, -2) and _is_consonant(word, -3)):
+        return False
+    return word[-1] not in "wxy"
+
+
 def download_text(url: str) -> str:
     """Download text from the given URL and return it as a string"""
     with urllib.request.urlopen(url) as response:
@@ -52,6 +99,74 @@ def remove_stop_words(terms: list[str], stopwords: set[str]) -> list[str]:
         if t_l not in sw:
             filtered.append(t_l)
     return filtered
+
+
+def stem_term(term: str) -> str:
+    """Stem a single term using a simplified Porter algorithm."""
+    word = term.lower()
+
+    # Step 1a
+    if word.endswith("sses"):
+        word = word[:-2]
+    elif word.endswith("ies"):
+        word = word[:-2]
+    elif word.endswith("ss"):
+        pass
+    elif word.endswith("s"):
+        word = word[:-1]
+
+    # Step 1b
+    if word.endswith("eed"):
+        stem = word[:-3]
+        if _measure(stem) > 0:
+            word = word[:-1]
+    elif word.endswith("ed"):
+        stem = word[:-2]
+        if _contains_vowel(stem):
+            word = stem
+            if word.endswith(("at", "bl", "iz")):
+                word += "e"
+            elif _doublec(word) and word[-1] not in "lsz":
+                word = word[:-1]
+            elif _measure(word) == 1 and _cvc(word):
+                word += "e"
+    elif word.endswith("ing"):
+        stem = word[:-3]
+        if _contains_vowel(stem):
+            word = stem
+            if word.endswith(("at", "bl", "iz")):
+                word += "e"
+            elif _doublec(word) and word[-1] not in "lsz":
+                word = word[:-1]
+            elif _measure(word) == 1 and _cvc(word):
+                word += "e"
+
+    # Step 1c
+    if word.endswith("y") and _contains_vowel(word[:-1]):
+        word = word[:-1] + "i"
+
+    # Step 2 (partial)
+    if word.endswith("er") and _measure(word[:-2]) > 0:
+        word = word[:-2]
+
+    # Step 4 (partial for 'ion')
+    if word.endswith("ion") and len(word) > 4 and word[-4] in "st" and _measure(word[:-3]) > 1:
+        word = word[:-3]
+
+    return word
+
+
+def stem_terms(terms: list[str]) -> list[str]:
+    """Stem a list of terms."""
+    return [stem_term(t) for t in terms]
+
+
+def update_document_stems(doc: Document) -> None:
+    """Update the stem-related term lists of a Document."""
+    doc._stemmed_terms = stem_terms(doc.terms)
+    ft = doc.filtered_terms
+    filtered = ft() if callable(ft) else ft
+    doc._filtered_stemmed_terms = stem_terms(filtered)
 
 
 def remove_stop_words_by_frequency(
@@ -116,25 +231,84 @@ def load_collection_from_url(
             author=author,
             origin=origin,
         )
+        update_document_stems(doc)
         docs.append(doc)
     return docs
 
 
 def linear_boolean_search(
-    term: str, collection: list[Document], stopword_filtered: bool = False
+    term: str,
+    collection: list[Document],
+    stopword_filtered: bool = False,
+    stemmed: bool = False,
 ) -> list[tuple[int, Document]]:
     """Perform a linear Boolean search: return (score, doc) for each document."""
-    term_lower = term.lower()
+    term_cmp = stem_term(term) if stemmed else term.lower()
     results: list[tuple[int, Document]] = []
     for doc in collection:
         if stopword_filtered:
             ft = doc.filtered_terms
-            # support filtered_terms as method or list attribute
+            terms_list = ft() if callable(ft) else ft
+            if stemmed:
+                if not doc._filtered_stemmed_terms:
+                    doc._filtered_stemmed_terms = stem_terms(terms_list)
+                tokens = doc._filtered_stemmed_terms
+            else:
+                tokens = [t.lower() for t in terms_list]
+        else:
+            terms_list = doc.terms
+            if stemmed:
+                if not doc._stemmed_terms:
+                    doc._stemmed_terms = stem_terms(terms_list)
+                tokens = doc._stemmed_terms
+            else:
+                tokens = [t.lower() for t in terms_list]
+
+        found = any(tok == term_cmp for tok in tokens)
+        score = 1 if found else 0
+        if stemmed:
+            if found:
+                results.append((score, doc))
+        else:
+            results.append((score, doc))
+    return results
+
+
+def vector_space_search(
+    query: str,
+    collection: list[Document],
+    stopword_filtered: bool = False,
+    stemmed: bool = False,
+) -> list[tuple[float, Document]]:
+    """Simple vector space search using term overlap as score."""
+    query_terms = tokenize(query)
+    if stemmed:
+        query_terms = stem_terms(query_terms)
+    query_terms = [t.lower() for t in query_terms]
+
+    results: list[tuple[float, Document]] = []
+    for doc in collection:
+        if stopword_filtered:
+            ft = doc.filtered_terms
             terms_list = ft() if callable(ft) else ft
         else:
             terms_list = doc.terms
-        # case-insensitive matching
-        found = any(t.lower() == term_lower for t in terms_list)
-        score = 1 if found else 0
-        results.append((score, doc))
+        if stemmed:
+            terms_list = stem_terms(terms_list)
+        terms_list = [t.lower() for t in terms_list]
+        score = sum(1 for t in query_terms if t in terms_list)
+        results.append((float(score), doc))
     return results
+
+
+def precision_recall(retrieved: set[int], relevant: set[int]) -> tuple[float, float]:
+    """Compute precision and recall."""
+    if not retrieved:
+        precision = 0.0
+    else:
+        precision = len(retrieved & relevant) / len(retrieved)
+    if not relevant:
+        recall = 0.0
+    else:
+        recall = len(retrieved & relevant) / len(relevant)
+    return precision, recall
