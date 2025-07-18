@@ -86,7 +86,7 @@ def load_documents_from_url(url: str, author: str, origin: str, start_line: int,
     return load_collection_from_url(url, search_pattern, start_line, end_line, author, origin)
 
 
-def linear_boolean_search(term, collection, stopword_filtered=False):
+def linear_boolean_search(term, collection, stopword_filtered=False, stemmed=False):
     """
     Search a given collection of documents for all documents that contain a given term, using a simple Boolean model.
 
@@ -102,4 +102,18 @@ def linear_boolean_search(term, collection, stopword_filtered=False):
 
     # The following code is an example. You may replace it how you see fit:
     from my_module import linear_boolean_search
-    return linear_boolean_search(term, collection, stopword_filtered)
+    return linear_boolean_search(term, collection, stopword_filtered, stemmed)
+
+
+def stem_term(term: str) -> str:
+    from my_module import stem_term as _stem
+    return _stem(term)
+
+
+def vector_space_search(query, collection, stopword_filtered=False, stemmed=False):
+    from my_module import vector_space_search as _vsm
+    return _vsm(query, collection, stopword_filtered, stemmed)
+
+def precision_recall(retrieved, relevant):
+    from my_module import precision_recall as _pr
+    return _pr(retrieved, relevant)
